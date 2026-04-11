@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IIYA - Cosmic Journey</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { overflow: hidden; background: #000; cursor: crosshair; }
+canvas { display: block; width: 100vw; height: 100vh; }
+#overlay {
+  position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  pointer-events: none; z-index: 10;
+  opacity: 1; transition: opacity 2s ease;
+}
+#overlay.fade { opacity: 0; }
+#title {
+  font-family: 'Helvetica Neue', sans-serif;
+  font-size: clamp(3rem, 10vw, 8rem);
+  font-weight: 100;
+  letter-spacing: 2rem;
+  color: rgba(255,255,255,0.9);
+  text-shadow: 0 0 60px rgba(120,180,255,0.5), 0 0 120px rgba(120,180,255,0.2);
+  animation: breathe 4s ease-in-out infinite;
+}
+#subtitle {
+  font-family: 'Helvetica Neue', sans-serif;
+  font-size: clamp(0.6rem, 1.5vw, 1rem);
+  font-weight: 300;
+  letter-spacing: 0.8rem;
+  color: rgba(255,255,255,0.4);
+  margin-top: 1.5rem;
+  animation: fadeInUp 3s ease forwards;
+}
+@keyframes breathe {
+  0%, 100% { opacity: 0.8; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.02); }
+}
+@keyframes fadeInUp {
+  0% { opacity: 0; transform: translateY(20px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+#hint {
+  position: fixed; bottom: 3rem; left: 50%; transform: translateX(-50%);
+  font-family: 'Helvetica Neue', sans-serif;
+  font-size: 0.7rem; letter-spacing: 0.4rem;
+  color: rgba(255,255,255,0.25);
+  pointer-events: none; z-index: 10;
+  animation: pulse 3s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 0.25; }
+  50% { opacity: 0.5; }
+}
+</style>
+</head>
+<body>
+<div id="overlay">
+  <div id="title">IIYA</div>
+  <div id="subtitle">MOVE YOUR CURSOR TO EXPLORE THE COSMOS</div>
+</div>
+<div id="hint">CLICK ANYWHERE TO ENTER</div>
+<canvas id="c"></canvas>
+
+<script>
+const canvas = document.getElementById('c');
+const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
+
+let W, H, mouse = { x: 0.5, y: 0.5, tx: 0.5, ty: 0.5 };
+let clicked = false, clickTime = 0;
+let startTime = Date.now();
+
+function resize() {
+  W = canvas.width = window.innerWidth * devicePixelRatio;
+  H = canvas.height = window.innerHeight * devicePixelRatio;
+  gl.viewport(0, 0, W, H);
+}
+window.addEventListener('resize', resize);
+resize();
+
+document.addEventListener('mousemove', e => {
+  mouse.tx = e.clientX / window.innerWidth;
+  mouse.ty = 1.0 - e.clientY / window.innerHeight;
+});
+document.addEventListener('touchmove', e => {
+  e.preventDefault();
+  mouse.tx = e.touches[0].clientX / window.innerWidth;
+  mouse.ty = 1.0 - e.touches[0].clientY / window.innerHeight;
+}, { passive: false });
+
+document.addEventListener('click', () => {
+  if (!clicked) {
+    clicked = true;
+    clickTime = (Date.now() - startTime) / 1000;
+    document.getElementById('overlay').classList.add('fade');
+    document.getElementById('hint').style.display = 'none';
+  }
+});
+
+const vertSrc = `
+attribute vec2 pos;
+void main() { gl_Position = vec4(pos, 0, 1); }
+`;
+
+const fragSrc = `
+#ifdef GL_ES
+precision highp float;
+#endif
+
+uniform float u_time;
+uniform float u_clickTime;
+uniform int u_clicked;
+uniform vec2 u_resolution;
+uniform vec2 u_mouse;
+
+#define PI 3.14159265359
+#define TAU 6.28318530718
+
+// Hash functions
+float hash(vec2 p) {
+  return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+}
+
+float hash3(vec3 p) {
+  return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453123);
+}
+
+// Smooth noise
+float noise(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  float a = hash(i);
+  float b = hash(i + vec2(1, 0));
+  float c = hash(i + vec2(0, 1));
+  float d = hash(i + vec2(1, 1));
+  return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+
+// 3D noise
+float noise3(vec3 p) {
+  vec3 i = floor(p);
+  vec3 f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  float n = mix(
+    mix(mix(hash3(i), hash3(i + vec3(1,0,0)), f.x),
+        mix(hash3(i + vec3(0,1,0)), hash3(i + vec3(1,1,0)), f.x), f.y),
+    mix(mix(hash3(i + vec3(0,0,1)), hash3(i + vec3(1,0,1)), f.x),
+        mix(hash3(i + vec3(0,1,1)), hash3(i + vec3(1,1,1)), f.x), f.y),
+    f.z
+  );
+  return n;
+}
+
+// FBM
+float fbm(vec2 p) {
+  float v = 0.0, a = 0.5;
+  mat2 rot = mat2(cos(0.5), sin(0.5), -sin(0.5), cos(0.5));
+  for (int i = 0; i < 6; i++) {
+    v += a * noise(p);
+    p = rot * p * 2.0 + vec2(100.0);
+    a *= 0.5;
+  }
+  return v;
+}
+
+float fbm3(vec3 p) {
+  float v = 0.0, a = 0.5;
+  for (int i = 0; i < 5; i++) {
+    v += a * noise3(p);
+    p = p * 2.1 + vec3(100.0);
+    a *= 0.5;
+  }
+  return v;
+}
+
+// Star field
+float stars(vec2 uv, float t) {
+  float s = 0.0;
+  for (int layer = 0; layer < 4; layer++) {
+    float fl = float(layer);
+    float scale = 80.0 + fl * 60.0;
+    float speed = 0.02 + fl * 0.01;
+    vec2 p = uv * scale + vec2(t * speed * (fl + 1.0), t * speed * 0.5);
+    vec2 id = floor(p);
+    vec2 f = fract(p) - 0.5;
+    float h = hash(id);
+    float brightness = smoothstep(0.92, 1.0, h);
+    float size = 0.03 + 0.02 * hash(id + 10.0);
+    float twinkle = sin(t * (2.0 + h * 4.0) + h * TAU) * 0.5 + 0.5;
+    brightness *= 0.7 + 0.3 * twinkle;
+    float d = length(f);
+    s += brightness * smoothstep(size, 0.0, d);
+    // Star glow
+    s += brightness * 0.3 * smoothstep(size * 4.0, 0.0, d);
+  }
+  return s;
+}
+
+// Nebula colors
+vec3 nebula(vec2 uv, float t, vec2 m) {
+  vec2 p = uv * 2.0 - 1.0;
+  p.x *= u_resolution.x / u_resolution.y;
+
+  // Warp space with mouse
+  p += (m - 0.5) * 0.5;
+
+  float t1 = t * 0.08;
+
+  // Domain warping for organic feel
+  vec2 q = vec2(fbm(p + vec2(0.0, t1)), fbm(p + vec2(5.2, 1.3)));
+  vec2 r = vec2(fbm(p + 4.0 * q + vec2(1.7, 9.2) + t1 * 0.15),
+                fbm(p + 4.0 * q + vec2(8.3, 2.8) + t1 * 0.126));
+  float f = fbm(p + 4.0 * r);
+
+  // Color palette - deep space vibes
+  vec3 col1 = vec3(0.05, 0.02, 0.15); // Deep purple
+  vec3 col2 = vec3(0.1, 0.05, 0.3);   // Violet
+  vec3 col3 = vec3(0.02, 0.15, 0.4);  // Deep blue
+  vec3 col4 = vec3(0.4, 0.1, 0.5);    // Magenta
+  vec3 col5 = vec3(0.1, 0.3, 0.6);    // Bright blue
+  vec3 col6 = vec3(0.9, 0.4, 0.2);    // Orange/gold accent
+
+  vec3 color = mix(col1, col2, smoothstep(0.0, 0.4, f));
+  color = mix(color, col3, smoothstep(0.2, 0.6, f));
+  color = mix(color, col4, smoothstep(0.4, 0.8, q.x));
+  color = mix(color, col5, smoothstep(0.3, 0.7, r.y));
+
+  // Hot spots
+  float hotspot = smoothstep(0.65, 0.95, f);
+  color += col6 * hotspot * 0.4;
+
+  // Brightness variation
+  color *= (f * f * 1.8 + 0.2);
+
+  return color;
+}
+
+// Volumetric god rays
+vec3 godRays(vec2 uv, float t, vec2 m) {
+  vec2 center = vec2(0.5 + (m.x - 0.5) * 0.3, 0.5 + (m.y - 0.5) * 0.3);
+  vec2 delta = uv - center;
+  float dist = length(delta);
+  float angle = atan(delta.y, delta.x);
+
+  float rays = 0.0;
+  rays += sin(angle * 8.0 + t * 0.3) * 0.5 + 0.5;
+  rays += sin(angle * 13.0 - t * 0.2) * 0.3 + 0.3;
+  rays *= smoothstep(1.2, 0.0, dist);
+  rays *= smoothstep(0.0, 0.3, dist);
+
+  return vec3(0.2, 0.3, 0.8) * rays * 0.15;
+}
+
+// Black hole / warp effect on click
+vec3 warpEffect(vec2 uv, float t, float ct) {
+  if (ct < 0.001) return vec3(0.0);
+  float elapsed = t - ct;
+  if (elapsed < 0.0) return vec3(0.0);
+
+  float progress = min(elapsed / 3.0, 1.0);
+  float intensity = sin(progress * PI) * 0.8;
+
+  vec2 center = vec2(0.5);
+  vec2 d = uv - center;
+  float dist = length(d);
+
+  // Spiral distortion
+  float spiralAngle = elapsed * 2.0 - dist * 10.0;
+  float spiral = sin(spiralAngle) * intensity * smoothstep(0.8, 0.0, dist);
+
+  vec3 col = vec3(0.3, 0.5, 1.0) * spiral;
+  col += vec3(1.0, 0.6, 0.3) * smoothstep(0.3, 0.0, dist) * intensity * 0.5;
+
+  // Ring
+  float ring = smoothstep(0.02, 0.0, abs(dist - 0.2 * progress));
+  col += vec3(0.5, 0.7, 1.0) * ring * intensity;
+
+  return col;
+}
+
+// Shooting star
+vec3 shootingStar(vec2 uv, float t) {
+  vec3 col = vec3(0.0);
+  for (int i = 0; i < 3; i++) {
+    float fi = float(i);
+    float period = 5.0 + fi * 3.7;
+    float phase = mod(t + fi * 2.3, period);
+    if (phase > 1.5) continue;
+
+    float progress = phase / 1.5;
+    float startX = hash(vec2(floor(t / period + fi), fi)) * 0.6 + 0.2;
+    float startY = 0.7 + hash(vec2(floor(t / period + fi), fi + 10.0)) * 0.25;
+    float angle = -0.3 - fi * 0.15;
+
+    vec2 pos = vec2(startX, startY) + vec2(cos(angle), sin(angle)) * progress * 0.8;
+    vec2 dir = normalize(vec2(cos(angle), sin(angle)));
+
+    // Trail
+    vec2 toPoint = uv - pos;
+    float along = dot(toPoint, -dir);
+    float perp = length(toPoint - (-dir) * along);
+
+    float trailLen = 0.15;
+    float trail = smoothstep(trailLen, 0.0, along) * smoothstep(-0.005, 0.0, along);
+    trail *= smoothstep(0.003, 0.0, perp);
+    trail *= (1.0 - progress);
+
+    col += vec3(0.8, 0.9, 1.0) * trail * 2.0;
+
+    // Head glow
+    float headDist = length(uv - pos);
+    col += vec3(1.0) * smoothstep(0.01, 0.0, headDist) * (1.0 - progress);
+  }
+  return col;
+}
+
+// Aurora effect
+vec3 aurora(vec2 uv, float t, vec2 m) {
+  vec3 col = vec3(0.0);
+  float aspect = u_resolution.x / u_resolution.y;
+
+  for (int i = 0; i < 5; i++) {
+    float fi = float(i);
+    float y = 0.55 + fi * 0.06;
+    float wave = sin(uv.x * (3.0 + fi) * aspect + t * (0.3 + fi * 0.1) + m.x * 2.0) * 0.04;
+    wave += sin(uv.x * (7.0 + fi * 2.0) * aspect + t * 0.5) * 0.02;
+
+    float band = smoothstep(0.04, 0.0, abs(uv.y - y - wave));
+    band *= smoothstep(0.0, 0.3, uv.x) * smoothstep(1.0, 0.7, uv.x);
+
+    vec3 auroraCol = mix(
+      vec3(0.1, 0.8, 0.4),
+      vec3(0.2, 0.3, 0.9),
+      fi / 5.0
+    );
+    auroraCol = mix(auroraCol, vec3(0.8, 0.2, 0.6), sin(t * 0.2 + fi) * 0.5 + 0.5);
+
+    col += auroraCol * band * 0.3;
+  }
+  return col;
+}
+
+void main() {
+  vec2 uv = gl_FragCoord.xy / u_resolution;
+  float t = u_time;
+  vec2 m = u_mouse;
+
+  // Background - deep space gradient
+  vec3 bg = mix(vec3(0.0, 0.0, 0.02), vec3(0.02, 0.0, 0.05), uv.y);
+
+  // Nebula
+  vec3 neb = nebula(uv, t, m);
+
+  // Stars
+  float s = stars(uv, t);
+  vec3 starCol = vec3(0.9, 0.95, 1.0) * s;
+  // Colored stars
+  starCol += vec3(1.0, 0.7, 0.4) * stars(uv + 0.5, t * 0.7) * 0.3;
+  starCol += vec3(0.4, 0.7, 1.0) * stars(uv + 0.3, t * 0.9) * 0.3;
+
+  // God rays
+  vec3 rays = godRays(uv, t, m);
+
+  // Aurora
+  vec3 aur = aurora(uv, t, m);
+
+  // Shooting stars
+  vec3 shoot = shootingStar(uv, t);
+
+  // Combine
+  vec3 color = bg + neb * 0.7 + starCol + rays + aur + shoot;
+
+  // Click warp effect
+  if (u_clicked == 1) {
+    color += warpEffect(uv, t, u_clickTime);
+  }
+
+  // Central glow - follows mouse subtly
+  vec2 glowCenter = vec2(0.5) + (m - 0.5) * 0.15;
+  float glow = smoothstep(0.8, 0.0, length((uv - glowCenter) * vec2(u_resolution.x/u_resolution.y, 1.0)));
+  color += vec3(0.05, 0.08, 0.2) * glow;
+
+  // Vignette
+  float vig = 1.0 - smoothstep(0.4, 1.4, length((uv - 0.5) * 1.8));
+  color *= vig;
+
+  // Tone mapping
+  color = color / (color + 0.8);
+
+  // Slight film grain
+  float grain = hash(uv * u_resolution + t) * 0.03;
+  color += grain;
+
+  // Gamma
+  color = pow(color, vec3(0.9));
+
+  gl_FragColor = vec4(color, 1.0);
+}
+`;
+
+function createShader(type, src) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+    console.error(gl.getShaderInfoLog(s));
+    return null;
+  }
+  return s;
+}
+
+const vs = createShader(gl.VERTEX_SHADER, vertSrc);
+const fs = createShader(gl.FRAGMENT_SHADER, fragSrc);
+const prog = gl.createProgram();
+gl.attachShader(prog, vs);
+gl.attachShader(prog, fs);
+gl.linkProgram(prog);
+gl.useProgram(prog);
+
+const buf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+const posLoc = gl.getAttribLocation(prog, 'pos');
+gl.enableVertexAttribArray(posLoc);
+gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
+
+const uTime = gl.getUniformLocation(prog, 'u_time');
+const uRes = gl.getUniformLocation(prog, 'u_resolution');
+const uMouse = gl.getUniformLocation(prog, 'u_mouse');
+const uClicked = gl.getUniformLocation(prog, 'u_clicked');
+const uClickTime = gl.getUniformLocation(prog, 'u_clickTime');
+
+function render() {
+  const t = (Date.now() - startTime) / 1000;
+
+  // Smooth mouse
+  mouse.x += (mouse.tx - mouse.x) * 0.03;
+  mouse.y += (mouse.ty - mouse.y) * 0.03;
+
+  gl.uniform1f(uTime, t);
+  gl.uniform2f(uRes, W, H);
+  gl.uniform2f(uMouse, mouse.x, mouse.y);
+  gl.uniform1i(uClicked, clicked ? 1 : 0);
+  gl.uniform1f(uClickTime, clickTime);
+
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  requestAnimationFrame(render);
+}
+
+render();
+</script>
+</body>
+</html>
