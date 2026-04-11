@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IIYA — Particle Life</title>
+<style>
+*{margin:0;padding:0}
+body{overflow:hidden;background:#0a0a0f}
+canvas{display:block}
+#controls{position:fixed;bottom:2rem;left:50%;transform:translateX(-50%);display:flex;gap:1rem;z-index:10}
+button{padding:0.6rem 1.5rem;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.15);color:rgba(255,255,255,0.6);font-family:'Helvetica Neue',sans-serif;font-size:0.6rem;letter-spacing:0.3rem;text-transform:uppercase;cursor:pointer;border-radius:30px;transition:all 0.3s}
+button:hover{background:rgba(255,255,255,0.15);color:#fff}
+</style>
+</head>
+<body>
+<div id="controls">
+  <button onclick="randomize()">RANDOMIZE</button>
+  <button onclick="reset()">RESET</button>
+</div>
+<canvas id="c"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let W, H;
+
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resize);
+resize();
+
+const TYPES = 6;
+const COUNT_PER_TYPE = 150;
+const TOTAL = TYPES * COUNT_PER_TYPE;
+
+const colors = [
+  '#ff6b6b', '#ffd93d', '#6bcb77', '#4d96ff', '#9b59b6', '#ff8c42'
+];
+
+let particles = [];
+let rules = [];
+
+function makeRules() {
+  rules = [];
+  for (let i = 0; i < TYPES; i++) {
+    rules[i] = [];
+    for (let j = 0; j < TYPES; j++) {
+      rules[i][j] = (Math.random() * 2 - 1); // -1 to 1
+    }
+  }
+}
+
+function createParticles() {
+  particles = [];
+  for (let t = 0; t < TYPES; t++) {
+    for (let i = 0; i < COUNT_PER_TYPE; i++) {
+      particles.push({
+        x: Math.random() * W,
+        y: Math.random() * H,
+        vx: 0, vy: 0,
+        type: t
+      });
+    }
+  }
+}
+
+function randomize() {
+  makeRules();
+}
+
+function reset() {
+  makeRules();
+  createParticles();
+}
+
+makeRules();
+createParticles();
+
+const RADIUS = 120;
+const FRICTION = 0.5;
+const DT = 0.02;
+
+function step() {
+  for (let i = 0; i < TOTAL; i++) {
+    let fx = 0, fy = 0;
+    const a = particles[i];
+
+    for (let j = 0; j < TOTAL; j++) {
+      if (i === j) continue;
+      const b = particles[j];
+      let dx = b.x - a.x;
+      let dy = b.y - a.y;
+
+      // Wrap
+      if (dx > W/2) dx -= W;
+      if (dx < -W/2) dx += W;
+      if (dy > H/2) dy -= H;
+      if (dy < -H/2) dy += H;
+
+      const d = Math.sqrt(dx*dx + dy*dy);
+      if (d > 0 && d < RADIUS) {
+        const g = rules[a.type][b.type];
+        const force = g / d;
+        fx += force * dx;
+        fy += force * dy;
+      }
+    }
+
+    a.vx = (a.vx + fx * DT) * FRICTION;
+    a.vy = (a.vy + fy * DT) * FRICTION;
+    a.x += a.vx;
+    a.y += a.vy;
+
+    // Wrap
+    if (a.x < 0) a.x += W;
+    if (a.x > W) a.x -= W;
+    if (a.y < 0) a.y += H;
+    if (a.y > H) a.y -= H;
+  }
+}
+
+function draw() {
+  ctx.fillStyle = 'rgba(10,10,15,0.15)';
+  ctx.fillRect(0, 0, W, H);
+
+  for (const p of particles) {
+    const speed = Math.sqrt(p.vx*p.vx + p.vy*p.vy);
+    const alpha = Math.min(0.4 + speed * 2, 1);
+    const size = 2 + speed * 1.5;
+
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, size, 0, Math.PI * 2);
+    ctx.fillStyle = colors[p.type];
+    ctx.globalAlpha = alpha;
+    ctx.fill();
+
+    // Glow
+    if (speed > 0.5) {
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, size * 3, 0, Math.PI * 2);
+      ctx.fillStyle = colors[p.type];
+      ctx.globalAlpha = alpha * 0.1;
+      ctx.fill();
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+
+function loop() {
+  for (let i = 0; i < 3; i++) step();
+  draw();
+  requestAnimationFrame(loop);
+}
+loop();
+</script>
+</body>
+</html>

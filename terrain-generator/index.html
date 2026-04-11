@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IIYA — Terrain Generator</title>
+<style>
+*{margin:0;padding:0}
+body{overflow:hidden;background:#000}
+canvas{display:block;width:100vw;height:100vh}
+#info{position:fixed;bottom:2rem;left:50%;transform:translateX(-50%);font-family:'Helvetica Neue',sans-serif;font-size:0.6rem;letter-spacing:0.4rem;color:rgba(255,255,255,0.3);pointer-events:none;z-index:10}
+#controls{position:fixed;top:2rem;right:2rem;display:flex;flex-direction:column;gap:0.5rem;z-index:10}
+button{padding:0.5rem 1rem;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.15);color:rgba(255,255,255,0.5);font-family:'Helvetica Neue',sans-serif;font-size:0.55rem;letter-spacing:0.2rem;cursor:pointer;border-radius:20px;transition:all 0.3s}
+button:hover{background:rgba(255,255,255,0.15);color:#fff}
+</style>
+</head>
+<body>
+<div id="info">MOVE MOUSE TO EXPLORE</div>
+<div id="controls">
+  <button onclick="newSeed()">NEW TERRAIN</button>
+</div>
+<canvas id="c"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const gl = canvas.getContext('webgl');
+let W, H;
+
+function resize() {
+  W = canvas.width = window.innerWidth * devicePixelRatio;
+  H = canvas.height = window.innerHeight * devicePixelRatio;
+  gl.viewport(0, 0, W, H);
+}
+window.addEventListener('resize', resize);
+resize();
+
+let mouse = { x: 0.5, y: 0.5 };
+let seed = Math.random() * 1000;
+
+document.addEventListener('mousemove', e => {
+  mouse.x = e.clientX / window.innerWidth;
+  mouse.y = e.clientY / window.innerHeight;
+});
+
+function newSeed() { seed = Math.random() * 1000; }
+
+const vertSrc = `attribute vec2 pos; void main(){ gl_Position = vec4(pos,0,1); }`;
+const fragSrc = `
+precision highp float;
+uniform vec2 u_resolution;
+uniform vec2 u_mouse;
+uniform float u_time;
+uniform float u_seed;
+
+float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453); }
+
+float noise(vec2 p) {
+  vec2 i = floor(p), f = fract(p);
+  f = f*f*(3.0-2.0*f);
+  return mix(mix(hash(i), hash(i+vec2(1,0)), f.x),
+             mix(hash(i+vec2(0,1)), hash(i+vec2(1,1)), f.x), f.y);
+}
+
+float fbm(vec2 p) {
+  float v = 0.0, a = 0.5;
+  mat2 rot = mat2(0.8, 0.6, -0.6, 0.8);
+  for(int i = 0; i < 8; i++) {
+    v += a * noise(p);
+    p = rot * p * 2.0;
+    a *= 0.5;
+  }
+  return v;
+}
+
+float terrain(vec2 p) {
+  return fbm(p + u_seed) * 0.7 + fbm(p * 2.0 + u_seed + 50.0) * 0.3;
+}
+
+vec3 getNormal(vec2 p, float eps) {
+  float h = terrain(p);
+  float hx = terrain(p + vec2(eps, 0.0));
+  float hy = terrain(p + vec2(0.0, eps));
+  return normalize(vec3(-(hx-h)/eps, 1.0, -(hy-h)/eps));
+}
+
+void main() {
+  vec2 uv = gl_FragCoord.xy / u_resolution;
+  float aspect = u_resolution.x / u_resolution.y;
+
+  // Camera
+  float camAngle = u_mouse.x * 3.14159 * 2.0;
+  float camPitch = 0.3 + u_mouse.y * 0.5;
+  float t = u_time * 0.03;
+
+  // Raymarching terrain
+  vec3 ro = vec3(sin(camAngle+t)*3.0, 2.0 + camPitch*2.0, cos(camAngle+t)*3.0);
+  vec3 target = vec3(sin(t)*0.5, 0.0, cos(t)*0.5);
+  vec3 fwd = normalize(target - ro);
+  vec3 right = normalize(cross(fwd, vec3(0,1,0)));
+  vec3 up = cross(right, fwd);
+
+  vec2 screen = (uv - 0.5) * vec2(aspect, 1.0);
+  vec3 rd = normalize(fwd + screen.x * right + screen.y * up);
+
+  // March
+  float dist = 0.0;
+  vec3 pos;
+  bool hit = false;
+  for(int i = 0; i < 200; i++) {
+    pos = ro + rd * dist;
+    float h = terrain(pos.xz) * 1.5 - 0.5;
+    float diff = pos.y - h;
+    if(diff < 0.005) { hit = true; break; }
+    dist += diff * 0.5;
+    if(dist > 30.0) break;
+  }
+
+  // Sky
+  float sunY = 0.3 + sin(u_time * 0.05) * 0.2;
+  vec3 sunDir = normalize(vec3(0.6, sunY, -0.8));
+  vec3 skyTop = vec3(0.1, 0.15, 0.4);
+  vec3 skyBot = vec3(0.6, 0.3, 0.2);
+  vec3 sky = mix(skyBot, skyTop, pow(max(uv.y, 0.0), 0.5));
+
+  // Sun
+  float sunDot = max(dot(rd, sunDir), 0.0);
+  sky += vec3(1.0, 0.7, 0.3) * pow(sunDot, 32.0) * 2.0;
+  sky += vec3(1.0, 0.5, 0.2) * pow(sunDot, 4.0) * 0.3;
+
+  vec3 color = sky;
+
+  if(hit) {
+    vec3 n = getNormal(pos.xz, 0.01);
+    float h = terrain(pos.xz);
+
+    // Terrain coloring
+    vec3 matCol;
+    if(h < 0.3) {
+      matCol = vec3(0.1, 0.3, 0.6); // Water
+    } else if(h < 0.38) {
+      matCol = vec3(0.76, 0.7, 0.5); // Sand
+    } else if(h < 0.6) {
+      float grass = noise(pos.xz * 10.0);
+      matCol = mix(vec3(0.15, 0.4, 0.1), vec3(0.2, 0.5, 0.15), grass);
+    } else if(h < 0.75) {
+      matCol = vec3(0.4, 0.35, 0.3); // Rock
+    } else {
+      matCol = vec3(0.9, 0.92, 0.95); // Snow
+    }
+
+    // Lighting
+    float diff = max(dot(n, sunDir), 0.0);
+    float amb = 0.2;
+    vec3 sunCol = vec3(1.0, 0.85, 0.6);
+
+    // Shadow - simple
+    float shadow = 1.0;
+    vec3 sPos = pos + n * 0.05;
+    for(int i = 0; i < 40; i++) {
+      sPos += sunDir * 0.1;
+      float sh = terrain(sPos.xz) * 1.5 - 0.5;
+      if(sPos.y < sh) { shadow = 0.3; break; }
+    }
+
+    color = matCol * (amb + diff * shadow) * sunCol;
+
+    // Water specular
+    if(h < 0.3) {
+      vec3 ref = reflect(-sunDir, n);
+      float spec = pow(max(dot(ref, -rd), 0.0), 64.0);
+      color += vec3(1.0, 0.8, 0.5) * spec * 0.5;
+      // Water animation
+      float wave = sin(pos.x * 20.0 + u_time) * sin(pos.z * 20.0 + u_time * 1.3) * 0.01;
+      color += vec3(0.1, 0.2, 0.3) * wave;
+    }
+
+    // Fog
+    float fog = 1.0 - exp(-dist * 0.08);
+    color = mix(color, sky, fog);
+  }
+
+  // Tone mapping
+  color = color / (color + 0.8);
+  color = pow(color, vec3(0.9));
+
+  gl_FragColor = vec4(color, 1.0);
+}
+`;
+
+function createShader(type, src) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) console.error(gl.getShaderInfoLog(s));
+  return s;
+}
+const prog = gl.createProgram();
+gl.attachShader(prog, createShader(gl.VERTEX_SHADER, vertSrc));
+gl.attachShader(prog, createShader(gl.FRAGMENT_SHADER, fragSrc));
+gl.linkProgram(prog);
+gl.useProgram(prog);
+
+const buf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1,1,-1,-1,1,1,1]), gl.STATIC_DRAW);
+const p = gl.getAttribLocation(prog, 'pos');
+gl.enableVertexAttribArray(p);
+gl.vertexAttribPointer(p, 2, gl.FLOAT, false, 0, 0);
+
+const uRes = gl.getUniformLocation(prog, 'u_resolution');
+const uMouse = gl.getUniformLocation(prog, 'u_mouse');
+const uTime = gl.getUniformLocation(prog, 'u_time');
+const uSeed = gl.getUniformLocation(prog, 'u_seed');
+
+let time = 0;
+function render() {
+  time += 1/60;
+  gl.uniform2f(uRes, W, H);
+  gl.uniform2f(uMouse, mouse.x, mouse.y);
+  gl.uniform1f(uTime, time);
+  gl.uniform1f(uSeed, seed);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  requestAnimationFrame(render);
+}
+render();
+</script>
+</body>
+</html>

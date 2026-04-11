@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IIYA — Infinite Zoom</title>
+<style>
+*{margin:0;padding:0}
+body{overflow:hidden;background:#000;cursor:crosshair}
+canvas{display:block;width:100vw;height:100vh}
+#info{position:fixed;bottom:2rem;left:50%;transform:translateX(-50%);font-family:'Helvetica Neue',sans-serif;font-size:0.6rem;letter-spacing:0.4rem;color:rgba(255,255,255,0.3);pointer-events:none;z-index:10}
+#zoom{position:fixed;top:2rem;right:2rem;font-family:'Helvetica Neue',monospace;font-size:0.7rem;color:rgba(255,255,255,0.3);pointer-events:none;z-index:10}
+</style>
+</head>
+<body>
+<div id="info">SCROLL TO ZOOM · DRAG TO PAN</div>
+<div id="zoom">ZOOM: 1x</div>
+<canvas id="c"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+const zoomDisplay = document.getElementById('zoom');
+
+let W, H;
+function resize() {
+  W = canvas.width = window.innerWidth * devicePixelRatio;
+  H = canvas.height = window.innerHeight * devicePixelRatio;
+  gl.viewport(0, 0, W, H);
+}
+window.addEventListener('resize', resize);
+resize();
+
+// Mandelbrot center and zoom
+let centerX = -0.745, centerY = 0.186;
+let zoom = 1.0;
+let targetZoom = 1.0;
+let autoZoom = true;
+let autoZoomSpeed = 1.003;
+let dragging = false, lastMX = 0, lastMY = 0;
+
+// Deep zoom target - Seahorse Valley
+const TARGET_X = -0.7453;
+const TARGET_Y = 0.1127;
+
+canvas.addEventListener('wheel', e => {
+  e.preventDefault();
+  autoZoom = false;
+  const factor = e.deltaY > 0 ? 0.9 : 1.1;
+  targetZoom *= factor;
+}, { passive: false });
+
+canvas.addEventListener('mousedown', e => {
+  dragging = true;
+  autoZoom = false;
+  lastMX = e.clientX;
+  lastMY = e.clientY;
+});
+canvas.addEventListener('mousemove', e => {
+  if (!dragging) return;
+  const dx = (e.clientX - lastMX) / window.innerWidth;
+  const dy = (e.clientY - lastMY) / window.innerHeight;
+  const scale = 3.0 / zoom;
+  centerX -= dx * scale;
+  centerY += dy * scale;
+  lastMX = e.clientX;
+  lastMY = e.clientY;
+});
+window.addEventListener('mouseup', () => dragging = false);
+
+canvas.addEventListener('dblclick', () => {
+  autoZoom = true;
+  centerX = TARGET_X;
+  centerY = TARGET_Y;
+});
+
+const vertSrc = `
+attribute vec2 pos;
+void main() { gl_Position = vec4(pos, 0, 1); }
+`;
+
+const fragSrc = `
+precision highp float;
+uniform vec2 u_resolution;
+uniform vec2 u_center;
+uniform float u_zoom;
+uniform float u_time;
+
+vec3 palette(float t) {
+  // Rich color cycling
+  vec3 a = vec3(0.5, 0.5, 0.5);
+  vec3 b = vec3(0.5, 0.5, 0.5);
+  vec3 c = vec3(1.0, 1.0, 1.0);
+  vec3 d = vec3(0.0, 0.1, 0.2);
+  return a + b * cos(6.28318 * (c * t + d + u_time * 0.02));
+}
+
+void main() {
+  vec2 uv = (gl_FragCoord.xy - u_resolution * 0.5) / min(u_resolution.x, u_resolution.y);
+  vec2 c = uv * (3.0 / u_zoom) + u_center;
+  vec2 z = vec2(0.0);
+
+  int maxIter = 500;
+  // Increase iterations with zoom
+  float zoomLog = log(u_zoom) / log(2.0);
+  if (zoomLog > 5.0) maxIter = 800;
+  if (zoomLog > 10.0) maxIter = 1200;
+  if (zoomLog > 15.0) maxIter = 2000;
+
+  int iter = 0;
+  float smooth_iter = 0.0;
+
+  for (int i = 0; i < 2000; i++) {
+    if (i >= maxIter) break;
+    float x2 = z.x * z.x;
+    float y2 = z.y * z.y;
+    if (x2 + y2 > 256.0) break;
+    z = vec2(x2 - y2 + c.x, 2.0 * z.x * z.y + c.y);
+    iter = i;
+  }
+
+  if (iter >= maxIter - 1) {
+    gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+    return;
+  }
+
+  // Smooth coloring
+  float sl = float(iter) - log(log(length(z))) / log(2.0);
+  float t = sl / 80.0;
+
+  vec3 col = palette(t);
+  // Inner glow
+  col *= 1.0 + 0.2 * sin(sl * 0.1);
+
+  gl_FragColor = vec4(col, 1.0);
+}
+`;
+
+function createShader(type, src) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) console.error(gl.getShaderInfoLog(s));
+  return s;
+}
+
+const prog = gl.createProgram();
+gl.attachShader(prog, createShader(gl.VERTEX_SHADER, vertSrc));
+gl.attachShader(prog, createShader(gl.FRAGMENT_SHADER, fragSrc));
+gl.linkProgram(prog);
+gl.useProgram(prog);
+
+const buf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+const posLoc = gl.getAttribLocation(prog, 'pos');
+gl.enableVertexAttribArray(posLoc);
+gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
+
+const uRes = gl.getUniformLocation(prog, 'u_resolution');
+const uCenter = gl.getUniformLocation(prog, 'u_center');
+const uZoom = gl.getUniformLocation(prog, 'u_zoom');
+const uTime = gl.getUniformLocation(prog, 'u_time');
+
+let t = 0;
+function render() {
+  t += 1/60;
+
+  if (autoZoom) {
+    zoom *= autoZoomSpeed;
+    // Slowly drift toward target
+    centerX += (TARGET_X - centerX) * 0.001;
+    centerY += (TARGET_Y - centerY) * 0.001;
+    // Reset if zoomed too far (floating point limits)
+    if (zoom > 1e13) {
+      zoom = 1;
+      centerX = TARGET_X + (Math.random()-0.5)*0.01;
+      centerY = TARGET_Y + (Math.random()-0.5)*0.01;
+    }
+  } else {
+    zoom += (targetZoom - zoom) * 0.1;
+  }
+
+  zoomDisplay.textContent = 'ZOOM: ' + (zoom > 1e6 ? zoom.toExponential(1) : Math.round(zoom)) + 'x';
+
+  gl.uniform2f(uRes, W, H);
+  gl.uniform2f(uCenter, centerX, centerY);
+  gl.uniform1f(uZoom, zoom);
+  gl.uniform1f(uTime, t);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+  requestAnimationFrame(render);
+}
+render();
+</script>
+</body>
+</html>

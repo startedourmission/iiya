@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IIYA — Neon City</title>
+<style>
+*{margin:0;padding:0}
+body{overflow:hidden;background:#000}
+canvas{display:block;width:100vw;height:100vh}
+#title{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);font-family:'Helvetica Neue',sans-serif;font-weight:100;font-size:clamp(2rem,6vw,5rem);letter-spacing:1.5rem;color:rgba(255,255,255,0);pointer-events:none;z-index:10;text-shadow:0 0 40px rgba(255,0,100,0.5),0 0 80px rgba(0,150,255,0.3);animation:titleIn 4s ease forwards}
+@keyframes titleIn{0%{color:rgba(255,255,255,0)}50%{color:rgba(255,255,255,0.6)}100%{color:rgba(255,255,255,0)}}
+</style>
+</head>
+<body>
+<div id="title">NEON CITY</div>
+<canvas id="c"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const gl = canvas.getContext('webgl');
+let W, H;
+let mouse = { x: 0.5, y: 0.5 };
+
+function resize() {
+  W = canvas.width = window.innerWidth * devicePixelRatio;
+  H = canvas.height = window.innerHeight * devicePixelRatio;
+  gl.viewport(0, 0, W, H);
+}
+window.addEventListener('resize', resize);
+resize();
+
+document.addEventListener('mousemove', e => {
+  mouse.x = e.clientX / window.innerWidth;
+  mouse.y = e.clientY / window.innerHeight;
+});
+
+const vertSrc = `attribute vec2 pos; void main(){ gl_Position = vec4(pos,0,1); }`;
+const fragSrc = `
+precision highp float;
+uniform vec2 u_resolution;
+uniform float u_time;
+uniform vec2 u_mouse;
+
+#define PI 3.14159265
+
+float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453); }
+
+float box(vec3 p, vec3 b) {
+  vec3 d = abs(p) - b;
+  return min(max(d.x, max(d.y, d.z)), 0.0) + length(max(d, 0.0));
+}
+
+float building(vec3 p, vec2 id) {
+  float h = hash(id);
+  float height = 0.5 + h * 3.0;
+  float w = 0.3 + hash(id + 10.0) * 0.15;
+  vec3 size = vec3(w, height, w);
+  return box(p - vec3(0, height, 0), size);
+}
+
+float cityBlock(vec3 p) {
+  float spacing = 1.2;
+  vec2 id = floor(p.xz / spacing);
+  vec3 q = p;
+  q.xz = mod(p.xz, spacing) - spacing * 0.5;
+
+  float d = building(q, id);
+
+  // Road
+  float road = p.y + 0.01;
+  d = min(d, road);
+  return d;
+}
+
+float scene(vec3 p) {
+  return cityBlock(p);
+}
+
+vec3 getNormal(vec3 p) {
+  float e = 0.001;
+  return normalize(vec3(
+    scene(p+vec3(e,0,0)) - scene(p-vec3(e,0,0)),
+    scene(p+vec3(0,e,0)) - scene(p-vec3(0,e,0)),
+    scene(p+vec3(0,0,e)) - scene(p-vec3(0,0,e))
+  ));
+}
+
+vec3 neonGlow(vec3 p, vec2 id, float d) {
+  float h = hash(id);
+  // Windows
+  vec2 windowUV = fract(p.xy * vec2(8.0, 4.0));
+  float window = step(0.15, windowUV.x) * step(windowUV.x, 0.85) *
+                 step(0.2, windowUV.y) * step(windowUV.y, 0.8);
+  float lit = step(0.4, hash(floor(p.xy * vec2(8.0, 4.0)) + id));
+
+  vec3 windowCol = vec3(0.0);
+  if(lit > 0.5 && window > 0.5) {
+    float hue = hash(id + 20.0);
+    if(hue < 0.3) windowCol = vec3(1.0, 0.3, 0.5);      // Pink
+    else if(hue < 0.6) windowCol = vec3(0.2, 0.5, 1.0);  // Blue
+    else windowCol = vec3(0.1, 1.0, 0.8);                  // Cyan
+    windowCol *= 0.5 + 0.5 * sin(hash(id+30.0) * 10.0 + p.y * 2.0);
+  }
+
+  // Neon signs
+  float signY = 0.5 + h * 2.0;
+  float signDist = abs(p.y - signY);
+  if(signDist < 0.1 && abs(fract(p.x * 2.0) - 0.5) < 0.3) {
+    float pulse = 0.7 + 0.3 * sin(hash(id+5.0) * 5.0 + p.x * 3.0);
+    float flicker = step(0.02, hash(id + floor(p.x*10.0 + p.y*10.0)));
+    vec3 signCol = h < 0.5 ? vec3(1.0, 0.1, 0.3) : vec3(0.1, 0.5, 1.0);
+    windowCol += signCol * pulse * flicker * smoothstep(0.1, 0.0, signDist);
+  }
+
+  return windowCol;
+}
+
+void main() {
+  vec2 uv = (gl_FragCoord.xy - u_resolution * 0.5) / u_resolution.y;
+  float t = u_time * 0.3;
+
+  // Camera - flying through city
+  float camX = t * 1.2;
+  float camZ = sin(t * 0.3) * 2.0;
+  float camY = 1.0 + sin(t * 0.5) * 0.3 + u_mouse.y * 1.5;
+
+  vec3 ro = vec3(camX, camY, camZ);
+  vec3 lookAt = ro + vec3(cos(t*0.2 + (u_mouse.x-0.5)*2.0), -0.1, sin(t*0.2));
+  vec3 fwd = normalize(lookAt - ro);
+  vec3 right = normalize(cross(fwd, vec3(0,1,0)));
+  vec3 up = cross(right, fwd);
+  vec3 rd = normalize(fwd + uv.x * right + uv.y * up);
+
+  // March
+  float dist = 0.0;
+  vec3 color = vec3(0.0);
+  bool hit = false;
+
+  for(int i = 0; i < 120; i++) {
+    vec3 p = ro + rd * dist;
+    float d = scene(p);
+    if(d < 0.002) { hit = true; break; }
+    // Accumulate volumetric fog/glow
+    if(d < 0.5) {
+      float spacing = 1.2;
+      vec2 id = floor(p.xz / spacing);
+      float buildH = 0.5 + hash(id) * 3.0;
+      if(p.y < buildH * 2.0 && p.y > 0.0) {
+        vec3 glow = neonGlow(p, id, d);
+        color += glow * 0.02 * exp(-d * 2.0);
+      }
+    }
+    dist += d;
+    if(dist > 40.0) break;
+  }
+
+  if(hit) {
+    vec3 p = ro + rd * dist;
+    vec3 n = getNormal(p);
+    float spacing = 1.2;
+    vec2 id = floor(p.xz / spacing);
+
+    // Base dark material
+    vec3 mat = vec3(0.02, 0.02, 0.04);
+
+    // Road reflection
+    if(p.y < 0.02) {
+      float wet = 0.5 + 0.5 * sin(p.x * 0.5 + p.z);
+      mat = vec3(0.01) + vec3(0.02, 0.01, 0.03) * wet;
+      // Reflect neon on wet road
+      vec3 refDir = reflect(rd, vec3(0,1,0));
+      vec3 refP = p + refDir * 0.5;
+      vec2 refId = floor(refP.xz / spacing);
+      mat += neonGlow(refP, refId, 0.0) * 0.15 * wet;
+    }
+
+    // Building surfaces
+    vec3 neon = neonGlow(p, id, 0.0);
+    mat += neon;
+
+    // Ambient
+    mat += vec3(0.01, 0.01, 0.03);
+
+    color += mat;
+
+    // Distance fog
+    float fog = 1.0 - exp(-dist * 0.06);
+    vec3 fogCol = vec3(0.02, 0.01, 0.05) + vec3(0.1, 0.05, 0.15) * 0.5;
+    color = mix(color, fogCol, fog);
+  } else {
+    // Sky
+    float skyGlow = exp(-max(uv.y + 0.2, 0.0) * 3.0);
+    color += vec3(0.15, 0.05, 0.2) * skyGlow;
+    color += vec3(0.02, 0.01, 0.05);
+  }
+
+  // Bloom approximation
+  color += color * color * 0.5;
+
+  // Tone map
+  color = color / (color + 0.6);
+  color = pow(color, vec3(0.85));
+
+  // Chromatic aberration at edges
+  float ca = length(uv) * 0.003;
+  color.r = color.r * (1.0 + ca);
+  color.b = color.b * (1.0 - ca);
+
+  // Scanlines
+  float scan = sin(gl_FragCoord.y * 1.5) * 0.03;
+  color -= scan;
+
+  gl_FragColor = vec4(max(color, 0.0), 1.0);
+}
+`;
+
+function createShader(type, src) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) console.error(gl.getShaderInfoLog(s));
+  return s;
+}
+const prog = gl.createProgram();
+gl.attachShader(prog, createShader(gl.VERTEX_SHADER, vertSrc));
+gl.attachShader(prog, createShader(gl.FRAGMENT_SHADER, fragSrc));
+gl.linkProgram(prog);
+gl.useProgram(prog);
+
+const buf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1,1,-1,-1,1,1,1]), gl.STATIC_DRAW);
+const posA = gl.getAttribLocation(prog, 'pos');
+gl.enableVertexAttribArray(posA);
+gl.vertexAttribPointer(posA, 2, gl.FLOAT, false, 0, 0);
+
+const uRes = gl.getUniformLocation(prog, 'u_resolution');
+const uTime = gl.getUniformLocation(prog, 'u_time');
+const uMouse = gl.getUniformLocation(prog, 'u_mouse');
+
+let time = 0;
+function render() {
+  time += 1/60;
+  gl.uniform2f(uRes, W, H);
+  gl.uniform1f(uTime, time);
+  gl.uniform2f(uMouse, mouse.x, mouse.y);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  requestAnimationFrame(render);
+}
+render();
+</script>
+</body>
+</html>
