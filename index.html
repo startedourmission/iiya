@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IIYA — Visual Experiments</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600&display=swap');
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  --bg: #08080c;
+  --card-bg: rgba(255,255,255,0.03);
+  --card-border: rgba(255,255,255,0.06);
+  --text: rgba(255,255,255,0.85);
+  --text-dim: rgba(255,255,255,0.35);
+  --accent: #6366f1;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Space Grotesk', sans-serif;
+  overflow-x: hidden;
+  cursor: default;
+}
+
+/* Animated background */
+#bg-canvas {
+  position: fixed;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  z-index: 0;
+  pointer-events: none;
+}
+
+/* Hero */
+.hero {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  text-align: center;
+  padding: 2rem;
+}
+
+.hero-title {
+  font-size: clamp(4rem, 15vw, 12rem);
+  font-weight: 600;
+  letter-spacing: 0.3em;
+  line-height: 1;
+  background: linear-gradient(135deg, #fff 0%, rgba(255,255,255,0.6) 50%, #6366f1 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  animation: titleShimmer 8s ease-in-out infinite;
+  position: relative;
+}
+
+@keyframes titleShimmer {
+  0%, 100% { filter: brightness(1); }
+  50% { filter: brightness(1.3); }
+}
+
+.hero-sub {
+  margin-top: 1.5rem;
+  font-size: clamp(0.7rem, 1.5vw, 0.9rem);
+  font-weight: 300;
+  letter-spacing: 0.6em;
+  color: var(--text-dim);
+  text-transform: uppercase;
+}
+
+.scroll-hint {
+  position: absolute;
+  bottom: 3rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.8rem;
+  color: var(--text-dim);
+  font-size: 0.6rem;
+  letter-spacing: 0.4em;
+  animation: float 3s ease-in-out infinite;
+}
+
+.scroll-hint .arrow {
+  width: 1px;
+  height: 40px;
+  background: linear-gradient(to bottom, transparent, rgba(255,255,255,0.3));
+  animation: scrollPulse 2s ease-in-out infinite;
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(8px); }
+}
+
+@keyframes scrollPulse {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 0.8; }
+}
+
+/* Grid */
+.gallery {
+  position: relative;
+  z-index: 1;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 2rem 2rem 8rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 1.5rem;
+}
+
+/* Card */
+.card {
+  position: relative;
+  border: 1px solid var(--card-border);
+  border-radius: 16px;
+  overflow: hidden;
+  background: var(--card-bg);
+  transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+  cursor: pointer;
+  text-decoration: none;
+  color: inherit;
+  display: block;
+}
+
+.card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 16px;
+  padding: 1px;
+  background: linear-gradient(135deg, transparent 40%, rgba(99,102,241,0.3) 100%);
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  opacity: 0;
+  transition: opacity 0.5s;
+}
+
+.card:hover {
+  transform: translateY(-8px);
+  border-color: rgba(99,102,241,0.2);
+  background: rgba(255,255,255,0.05);
+  box-shadow: 0 20px 60px rgba(0,0,0,0.4), 0 0 40px rgba(99,102,241,0.08);
+}
+
+.card:hover::before { opacity: 1; }
+
+.card-preview {
+  width: 100%;
+  height: 200px;
+  position: relative;
+  overflow: hidden;
+}
+
+.card-preview canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.card-preview .preview-overlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to bottom, transparent 50%, var(--bg) 100%);
+}
+
+.card-body {
+  padding: 1.5rem;
+  position: relative;
+}
+
+.card-num {
+  font-size: 0.6rem;
+  letter-spacing: 0.3em;
+  color: var(--accent);
+  font-weight: 500;
+  margin-bottom: 0.5rem;
+}
+
+.card-title {
+  font-size: 1.2rem;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.5rem;
+}
+
+.card-desc {
+  font-size: 0.75rem;
+  font-weight: 300;
+  color: var(--text-dim);
+  line-height: 1.6;
+  letter-spacing: 0.02em;
+}
+
+.card-arrow {
+  position: absolute;
+  right: 1.5rem;
+  bottom: 1.5rem;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1px solid rgba(255,255,255,0.1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s;
+  color: var(--text-dim);
+  font-size: 0.8rem;
+}
+
+.card:hover .card-arrow {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  transform: translateX(4px);
+}
+
+/* Footer */
+.footer {
+  position: relative;
+  z-index: 1;
+  text-align: center;
+  padding: 3rem 2rem;
+  border-top: 1px solid rgba(255,255,255,0.04);
+}
+
+.footer p {
+  font-size: 0.6rem;
+  letter-spacing: 0.4em;
+  color: var(--text-dim);
+}
+
+.footer a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+/* Mobile */
+@media (max-width: 600px) {
+  .gallery { grid-template-columns: 1fr; padding: 1rem 1rem 6rem; }
+  .hero-title { letter-spacing: 0.15em; }
+}
+</style>
+</head>
+<body>
+<canvas id="bg-canvas"></canvas>
+
+<section class="hero">
+  <h1 class="hero-title">IIYA</h1>
+  <p class="hero-sub">visual experiments by claude code</p>
+  <div class="scroll-hint">
+    <span>SCROLL</span>
+    <div class="arrow"></div>
+  </div>
+</section>
+
+<section class="gallery" id="gallery"></section>
+
+<footer class="footer">
+  <p>BUILT WITH <a href="https://claude.ai/code" target="_blank">CLAUDE CODE</a></p>
+</footer>
+
+<script>
+// === Background particles ===
+const bgCanvas = document.getElementById('bg-canvas');
+const bgCtx = bgCanvas.getContext('2d');
+let bW, bH;
+const particles = [];
+const PARTICLE_COUNT = 80;
+
+function resizeBg() {
+  bW = bgCanvas.width = window.innerWidth;
+  bH = bgCanvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resizeBg);
+resizeBg();
+
+for (let i = 0; i < PARTICLE_COUNT; i++) {
+  particles.push({
+    x: Math.random() * bW,
+    y: Math.random() * bH,
+    vx: (Math.random() - 0.5) * 0.3,
+    vy: (Math.random() - 0.5) * 0.3,
+    size: Math.random() * 1.5 + 0.5,
+    alpha: Math.random() * 0.3 + 0.05
+  });
+}
+
+let mouseX = bW / 2, mouseY = bH / 2;
+document.addEventListener('mousemove', e => { mouseX = e.clientX; mouseY = e.clientY; });
+
+function drawBg() {
+  bgCtx.fillStyle = '#08080c';
+  bgCtx.fillRect(0, 0, bW, bH);
+
+  // Subtle gradient orbs
+  const scrollY = window.scrollY;
+  const orb1Y = bH * 0.3 - scrollY * 0.1;
+  const grad1 = bgCtx.createRadialGradient(bW * 0.2, orb1Y, 0, bW * 0.2, orb1Y, bW * 0.5);
+  grad1.addColorStop(0, 'rgba(99,102,241,0.04)');
+  grad1.addColorStop(1, 'transparent');
+  bgCtx.fillStyle = grad1;
+  bgCtx.fillRect(0, 0, bW, bH);
+
+  const orb2Y = bH * 0.7 - scrollY * 0.05;
+  const grad2 = bgCtx.createRadialGradient(bW * 0.8, orb2Y, 0, bW * 0.8, orb2Y, bW * 0.4);
+  grad2.addColorStop(0, 'rgba(139,92,246,0.03)');
+  grad2.addColorStop(1, 'transparent');
+  bgCtx.fillStyle = grad2;
+  bgCtx.fillRect(0, 0, bW, bH);
+
+  // Particles
+  for (const p of particles) {
+    p.x += p.vx;
+    p.y += p.vy;
+    if (p.x < 0) p.x = bW;
+    if (p.x > bW) p.x = 0;
+    if (p.y < 0) p.y = bH;
+    if (p.y > bH) p.y = 0;
+
+    // Subtle mouse attraction
+    const dx = mouseX - p.x, dy = mouseY - p.y;
+    const dist = Math.sqrt(dx*dx + dy*dy);
+    if (dist < 200) {
+      p.vx += dx * 0.00003;
+      p.vy += dy * 0.00003;
+    }
+    p.vx *= 0.99;
+    p.vy *= 0.99;
+
+    bgCtx.beginPath();
+    bgCtx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+    bgCtx.fillStyle = `rgba(255,255,255,${p.alpha})`;
+    bgCtx.fill();
+  }
+
+  // Lines between close particles
+  for (let i = 0; i < particles.length; i++) {
+    for (let j = i + 1; j < particles.length; j++) {
+      const dx = particles[i].x - particles[j].x;
+      const dy = particles[i].y - particles[j].y;
+      const d = Math.sqrt(dx*dx + dy*dy);
+      if (d < 120) {
+        bgCtx.beginPath();
+        bgCtx.moveTo(particles[i].x, particles[i].y);
+        bgCtx.lineTo(particles[j].x, particles[j].y);
+        bgCtx.strokeStyle = `rgba(255,255,255,${(1 - d/120) * 0.06})`;
+        bgCtx.stroke();
+      }
+    }
+  }
+
+  requestAnimationFrame(drawBg);
+}
+drawBg();
+
+// === Card mini-previews ===
+const projects = [
+  {
+    id: 'cosmic-journey', num: '01', title: 'Cosmic Journey',
+    desc: '인터랙티브 우주 시뮬레이션 — 셰이더 기반 성운, 별빛, 오로라',
+    preview: (ctx, w, h, t) => {
+      for (let i = 0; i < 60; i++) {
+        const x = ((Math.sin(i*0.7+t)*0.5+0.5)*1.3-0.15)*w;
+        const y = ((Math.cos(i*0.5+t*0.7)*0.5+0.5)*1.3-0.15)*h;
+        const r = 1 + Math.sin(i+t)*0.5;
+        ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2);
+        ctx.fillStyle=`hsla(${220+i*3},60%,70%,${0.3+Math.sin(i+t)*0.2})`;
+        ctx.fill();
+      }
+      const g=ctx.createRadialGradient(w*0.3,h*0.5,0,w*0.3,h*0.5,w*0.4);
+      g.addColorStop(0,'rgba(100,50,180,0.15)');g.addColorStop(1,'transparent');
+      ctx.fillStyle=g;ctx.fillRect(0,0,w,h);
+    }
+  },
+  {
+    id: 'fluid-sim', num: '02', title: 'Fluid Simulation',
+    desc: '마우스로 만지는 유체 시뮬레이션 — 물감이 퍼지듯 색이 섞이는',
+    preview: (ctx, w, h, t) => {
+      for (let i = 0; i < 8; i++) {
+        const x = w*(0.2+i*0.08+Math.sin(t+i)*0.05);
+        const y = h*(0.3+Math.cos(t*0.8+i*0.5)*0.2);
+        const g=ctx.createRadialGradient(x,y,0,x,y,w*0.2);
+        const hue=(t*20+i*45)%360;
+        g.addColorStop(0,`hsla(${hue},80%,50%,0.2)`);g.addColorStop(1,'transparent');
+        ctx.fillStyle=g;ctx.fillRect(0,0,w,h);
+      }
+    }
+  },
+  {
+    id: 'audio-visualizer', num: '03', title: 'Audio Visualizer',
+    desc: '음악에 반응하는 실시간 3D 파형 비주얼라이저',
+    preview: (ctx, w, h, t) => {
+      const cx=w/2,cy=h/2;
+      for(let i=0;i<60;i++){
+        const a=(i/60)*Math.PI*2;
+        const r=30+Math.sin(i*0.5+t*3)*15;
+        const x1=cx+Math.cos(a)*r,y1=cy+Math.sin(a)*r;
+        const x2=cx+Math.cos(a)*(r+10+Math.sin(i+t*2)*8);
+        const y2=cy+Math.sin(a)*(r+10+Math.sin(i+t*2)*8);
+        ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);
+        ctx.strokeStyle=`hsla(${(t*30+i*6)%360},80%,60%,0.6)`;ctx.lineWidth=2;ctx.stroke();
+      }
+    }
+  },
+  {
+    id: 'particle-life', num: '04', title: 'Particle Life',
+    desc: '입자들이 끌고 밀며 생명체처럼 군집하는 인공생명 시뮬레이션',
+    preview: (ctx, w, h, t) => {
+      const cols=['#ff6b6b','#ffd93d','#6bcb77','#4d96ff'];
+      for(let i=0;i<40;i++){
+        const ci=i%4;
+        const x=w*(0.3+0.4*Math.sin(i*1.1+t+ci))+Math.cos(i*2.3+t)*20;
+        const y=h*(0.3+0.4*Math.cos(i*0.9+t*0.7+ci))+Math.sin(i*1.7+t)*20;
+        ctx.beginPath();ctx.arc(x,y,2.5,0,Math.PI*2);
+        ctx.fillStyle=cols[ci];ctx.globalAlpha=0.7;ctx.fill();
+      }
+      ctx.globalAlpha=1;
+    }
+  },
+  {
+    id: 'terrain-generator', num: '05', title: 'Terrain Generator',
+    desc: '절차적 3D 지형 생성 — 산, 바다, 숲, 날씨가 실시간으로',
+    preview: (ctx, w, h, t) => {
+      // Mountains
+      for(let layer=0;layer<3;layer++){
+        ctx.beginPath();ctx.moveTo(0,h);
+        for(let x=0;x<=w;x+=4){
+          const y=h*0.4+layer*h*0.15+Math.sin(x*0.02+layer+t*0.3)*h*0.12+Math.sin(x*0.05+layer*2)*h*0.06;
+          ctx.lineTo(x,y);
+        }
+        ctx.lineTo(w,h);ctx.closePath();
+        const l=20+layer*15;
+        ctx.fillStyle=`hsl(${200+layer*20},30%,${l}%)`;ctx.fill();
+      }
+      // Sun
+      ctx.beginPath();ctx.arc(w*0.75,h*0.25,15,0,Math.PI*2);
+      ctx.fillStyle='rgba(255,200,100,0.5)';ctx.fill();
+    }
+  },
+  {
+    id: 'infinite-zoom', num: '06', title: 'Infinite Zoom',
+    desc: '프랙탈 기반 무한 줌 — 끝없이 들어가는 만델브로 집합',
+    preview: (ctx, w, h, t) => {
+      for(let i=0;i<50;i++){
+        const s=1+i*0.3+Math.sin(t)*0.5;
+        const x=w/2+Math.cos(i*0.618*Math.PI*2+t)*w*0.3/s;
+        const y=h/2+Math.sin(i*0.618*Math.PI*2+t)*h*0.3/s;
+        ctx.beginPath();ctx.arc(x,y,Math.max(1,8/s),0,Math.PI*2);
+        ctx.fillStyle=`hsla(${(i*15+t*20)%360},70%,50%,${0.5/s+0.1})`;ctx.fill();
+      }
+    }
+  },
+  {
+    id: 'gravity-playground', num: '07', title: 'Gravity Playground',
+    desc: '행성을 놓으면 중력 궤도가 형성되는 태양계 시뮬레이터',
+    preview: (ctx, w, h, t) => {
+      const cx=w/2,cy=h/2;
+      // Sun
+      ctx.beginPath();ctx.arc(cx,cy,8,0,Math.PI*2);
+      ctx.fillStyle='#ffd93d';ctx.fill();
+      const g=ctx.createRadialGradient(cx,cy,8,cx,cy,30);
+      g.addColorStop(0,'rgba(255,217,61,0.2)');g.addColorStop(1,'transparent');
+      ctx.fillStyle=g;ctx.beginPath();ctx.arc(cx,cy,30,0,Math.PI*2);ctx.fill();
+      // Orbits
+      const planets=[{d:30,s:2,c:'#4d96ff',r:3},{d:55,s:1.2,c:'#ff6b6b',r:4},{d:80,s:0.7,c:'#6bcb77',r:3.5}];
+      for(const p of planets){
+        ctx.beginPath();ctx.arc(cx,cy,p.d,0,Math.PI*2);ctx.strokeStyle='rgba(255,255,255,0.05)';ctx.stroke();
+        const a=t*p.s;const px=cx+Math.cos(a)*p.d,py=cy+Math.sin(a)*p.d;
+        ctx.beginPath();ctx.arc(px,py,p.r,0,Math.PI*2);ctx.fillStyle=p.c;ctx.fill();
+      }
+    }
+  },
+  {
+    id: 'neon-city', num: '08', title: 'Neon City',
+    desc: '사이버펑크 3D 도시를 날아다니는 플라이스루',
+    preview: (ctx, w, h, t) => {
+      // Buildings silhouette
+      for(let i=0;i<12;i++){
+        const bw=w*0.06+Math.sin(i*3)*w*0.02;
+        const bh=h*0.3+Math.sin(i*2.1)*h*0.25;
+        const bx=i*(w/12);
+        ctx.fillStyle=`hsl(${260+i*5},40%,${8+i})`;
+        ctx.fillRect(bx,h-bh,bw,bh);
+        // Neon windows
+        for(let wy=h-bh+5;wy<h-5;wy+=8){
+          if(Math.sin(i*7+wy)>0){
+            const nc=i%2===0?'rgba(255,50,100,0.6)':'rgba(50,150,255,0.6)';
+            ctx.fillStyle=nc;ctx.fillRect(bx+3,wy,bw-6,3);
+          }
+        }
+      }
+      // Ground glow
+      const gg=ctx.createLinearGradient(0,h,0,h-30);
+      gg.addColorStop(0,'rgba(255,0,100,0.15)');gg.addColorStop(1,'transparent');
+      ctx.fillStyle=gg;ctx.fillRect(0,h-30,w,30);
+    }
+  },
+  {
+    id: 'silk-weaver', num: '09', title: 'Silk Weaver',
+    desc: '마우스 궤적을 따라 실크 곡선이 엮이는 제너러티브 아트',
+    preview: (ctx, w, h, t) => {
+      ctx.globalCompositeOperation='lighter';
+      for(let i=0;i<20;i++){
+        const x1=w*(0.2+0.3*Math.sin(t+i*0.3));
+        const y1=h*(0.2+0.3*Math.cos(t*0.7+i*0.2));
+        const x2=w*(0.5+0.3*Math.cos(t*0.5+i*0.4));
+        const y2=h*(0.5+0.3*Math.sin(t*0.8+i*0.3));
+        const mx=(x1+x2)/2+Math.sin(i+t)*30;
+        const my=(y1+y2)/2+Math.cos(i+t)*30;
+        ctx.beginPath();ctx.moveTo(x1,y1);ctx.quadraticCurveTo(mx,my,x2,y2);
+        ctx.strokeStyle=`hsla(${(i*18+t*15)%360},70%,60%,0.15)`;ctx.lineWidth=1;ctx.stroke();
+      }
+      ctx.globalCompositeOperation='source-over';
+    }
+  },
+  {
+    id: 'wave-interference', num: '10', title: 'Wave Interference',
+    desc: '파동 간섭 시뮬레이션 — 파문과 색의 간섭 패턴',
+    preview: (ctx, w, h, t) => {
+      const imgData=ctx.createImageData(w,h);
+      const d=imgData.data;
+      const sources=[{x:0.35,y:0.5},{x:0.65,y:0.5}];
+      for(let py=0;py<h;py+=2){
+        for(let px=0;px<w;px+=2){
+          let wave=0;
+          for(const s of sources){
+            const dx=(px/w-s.x)*2,dy=(py/h-s.y)*2;
+            const dist=Math.sqrt(dx*dx+dy*dy);
+            wave+=Math.sin(dist*30-t*3)*Math.exp(-dist*2);
+          }
+          const v=Math.floor((wave*0.5+0.5)*255);
+          const idx=(py*w+px)*4;
+          d[idx]=v*0.3;d[idx+1]=v*0.5;d[idx+2]=v;d[idx+3]=255;
+          // Fill 2x2
+          if(px+1<w){d[idx+4]=d[idx];d[idx+5]=d[idx+1];d[idx+6]=d[idx+2];d[idx+7]=255;}
+          if(py+1<h){
+            const idx2=((py+1)*w+px)*4;
+            d[idx2]=d[idx];d[idx2+1]=d[idx+1];d[idx2+2]=d[idx+2];d[idx2+3]=255;
+            if(px+1<w){d[idx2+4]=d[idx];d[idx2+5]=d[idx+1];d[idx2+6]=d[idx+2];d[idx2+7]=255;}
+          }
+        }
+      }
+      ctx.putImageData(imgData,0,0);
+    }
+  }
+];
+
+// === Build cards ===
+const gallery = document.getElementById('gallery');
+
+projects.forEach(proj => {
+  const card = document.createElement('a');
+  card.className = 'card';
+  card.href = `./${proj.id}/`;
+  card.innerHTML = `
+    <div class="card-preview"><canvas></canvas><div class="preview-overlay"></div></div>
+    <div class="card-body">
+      <div class="card-num">${proj.num}</div>
+      <div class="card-title">${proj.title}</div>
+      <div class="card-desc">${proj.desc}</div>
+      <div class="card-arrow">&#8594;</div>
+    </div>
+  `;
+  gallery.appendChild(card);
+});
+
+// Animate previews
+const cardCanvases = document.querySelectorAll('.card-preview canvas');
+const previewContexts = [];
+
+cardCanvases.forEach((c, i) => {
+  const rect = c.parentElement;
+  c.width = 340; c.height = 200;
+  previewContexts.push(c.getContext('2d'));
+});
+
+let animTime = 0;
+function animatePreviews() {
+  animTime += 1/60;
+  previewContexts.forEach((ctx, i) => {
+    ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+    ctx.fillStyle = '#0a0a14';
+    ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+    projects[i].preview(ctx, ctx.canvas.width, ctx.canvas.height, animTime);
+  });
+  requestAnimationFrame(animatePreviews);
+}
+animatePreviews();
+
+// === Scroll reveal ===
+const observer = new IntersectionObserver((entries) => {
+  entries.forEach(entry => {
+    if (entry.isIntersecting) {
+      entry.target.style.opacity = '1';
+      entry.target.style.transform = 'translateY(0)';
+    }
+  });
+}, { threshold: 0.1 });
+
+document.querySelectorAll('.card').forEach((card, i) => {
+  card.style.opacity = '0';
+  card.style.transform = 'translateY(40px)';
+  card.style.transition = `all 0.6s cubic-bezier(0.16, 1, 0.3, 1) ${i * 0.08}s`;
+  observer.observe(card);
+});
+</script>
+</body>
+</html>
